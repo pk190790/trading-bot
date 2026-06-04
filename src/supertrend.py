@@ -1,5 +1,20 @@
 import pandas as pd
-import pandas_ta as ta
+
+
+def _atr(df: pd.DataFrame, period: int) -> pd.Series:
+    """Wilder's ATR — matches PineScript atr() function."""
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    # Wilder smoothing (RMA) — same as PineScript default atr()
+    atr = tr.ewm(alpha=1 / period, adjust=False).mean()
+    return atr
 
 
 def calculate_supertrend(df: pd.DataFrame, atr_period: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
@@ -12,7 +27,7 @@ def calculate_supertrend(df: pd.DataFrame, atr_period: int = 10, multiplier: flo
 
     src = (df["high"] + df["low"]) / 2  # hl2
 
-    atr = ta.atr(df["high"], df["low"], df["close"], length=atr_period)
+    atr = _atr(df, atr_period)
 
     raw_up = src - (multiplier * atr)
     raw_dn = src + (multiplier * atr)
@@ -57,7 +72,7 @@ def calculate_supertrend(df: pd.DataFrame, atr_period: int = 10, multiplier: flo
     return df
 
 
-def get_latest_signal(df: pd.DataFrame) -> str | None:
+def get_latest_signal(df: pd.DataFrame):
     """Returns 'BUY', 'SELL', or None based on the last candle."""
     last = df.iloc[-1]
     if last["buy_signal"]:

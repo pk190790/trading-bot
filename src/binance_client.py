@@ -66,7 +66,7 @@ def place_market_order(exchange: ccxt.binanceusdm, symbol: str, side: str, usdt_
     return order
 
 
-def get_open_position(exchange: ccxt.binanceusdm, symbol: str) -> dict | None:
+def get_open_position(exchange: ccxt.binanceusdm, symbol: str):
     positions = exchange.fetch_positions([symbol])
     for pos in positions:
         if float(pos["contracts"]) != 0:

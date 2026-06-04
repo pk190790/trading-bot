@@ -5,27 +5,34 @@ from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TESTNET
 
 logger = logging.getLogger(__name__)
 
+TESTNET_BASE = "https://testnet.binancefuture.com"
+
 TESTNET_URLS = {
-    "api": {
-        "public": "https://testnet.binancefuture.com",
-        "private": "https://testnet.binancefuture.com",
-    }
+    "fapiPublic": f"{TESTNET_BASE}/fapi/v1",
+    "fapiPublicV2": f"{TESTNET_BASE}/fapi/v2",
+    "fapiPrivate": f"{TESTNET_BASE}/fapi/v1",
+    "fapiPrivateV2": f"{TESTNET_BASE}/fapi/v2",
+    "fapiPrivateV3": f"{TESTNET_BASE}/fapi/v3",
+    "fapiData": f"{TESTNET_BASE}/futures/data",
 }
 
 
 def create_exchange() -> ccxt.binanceusdm:
-    params = {
+    exchange = ccxt.binanceusdm({
         "apiKey": BINANCE_API_KEY,
         "secret": BINANCE_API_SECRET,
-        "options": {"defaultType": "future"},
-    }
+        "options": {
+            "defaultType": "future",
+            "fetchCurrencies": False,
+        },
+    })
+
     if BINANCE_TESTNET:
-        params["urls"] = TESTNET_URLS
+        exchange.urls["api"].update(exchange.urls["test"])
         logger.info("Connecting to Binance Futures TESTNET")
     else:
         logger.info("Connecting to Binance Futures LIVE")
 
-    exchange = ccxt.binanceusdm(params)
     exchange.load_markets()
     return exchange
 

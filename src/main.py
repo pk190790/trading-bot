@@ -5,7 +5,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from src import binance_client as bc
 from src.supertrend import calculate_supertrend, get_latest_signal
 from src.order_handler import handle_signal
-from src.config import SYMBOL, TIMEFRAME, ATR_PERIOD, ATR_MULTIPLIER
+from src.config import SYMBOL, TIMEFRAME, ATR_PERIOD, ATR_MULTIPLIER, STOP_LOSS_PCT, TAKE_PROFIT_PCT
 import os
 
 logging.basicConfig(
@@ -42,6 +42,9 @@ def run_bot() -> None:
 
             last_status.update({"trend": trend, "signal": signal or "none", "time": last_candle})
 
+            # Stop-Loss / Take-Profit prüfen
+            check_sl_tp(ex)
+
             if signal:
                 handle_signal(ex, signal)
             return
@@ -53,6 +56,42 @@ def run_bot() -> None:
                 time.sleep(10 * attempt)
             else:
                 logger.error("All retries failed — will try again next tick.")
+
+
+def check_sl_tp(ex) -> None:
+    """Schließt Position wenn Stop-Loss oder Take-Profit erreicht."""
+    if STOP_LOSS_PCT <= 0 and TAKE_PROFIT_PCT <= 0:
+        return
+    pos = bc.get_open_position(ex, SYMBOL)
+    if not pos:
+        return
+
+    contracts = float(pos.get("contracts", 0))
+    if contracts == 0:
+        return
+
+    entry = float(pos.get("entryPrice", 0))
+    current = float(pos.get("markPrice", 0))
+    side = "long" if contracts > 0 else "short"
+
+    if entry == 0 or current == 0:
+        return
+
+    if side == "long":
+        pnl_pct = (current - entry) / entry * 100
+    else:
+        pnl_pct = (entry - current) / entry * 100
+
+    close_side = "sell" if side == "long" else "buy"
+    notional = abs(float(pos.get("notional", 0)))
+
+    if STOP_LOSS_PCT > 0 and pnl_pct <= -STOP_LOSS_PCT:
+        logger.warning(f"STOP-LOSS ausgelöst! {pnl_pct:.2f}% | Entry: {entry:.2f} | Aktuell: {current:.2f}")
+        bc.place_market_order(ex, SYMBOL, close_side, notional)
+
+    elif TAKE_PROFIT_PCT > 0 and pnl_pct >= TAKE_PROFIT_PCT:
+        logger.info(f"TAKE-PROFIT ausgelöst! +{pnl_pct:.2f}% | Entry: {entry:.2f} | Aktuell: {current:.2f}")
+        bc.place_market_order(ex, SYMBOL, close_side, notional)
 
 
 def get_schedule_interval(timeframe: str) -> int:

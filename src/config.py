@@ -13,3 +13,5 @@ MAX_LEVERAGE = int(os.getenv("MAX_LEVERAGE", "5"))
 MAX_TRADE_USDT = float(os.getenv("MAX_TRADE_USDT", "100"))
 ATR_PERIOD = int(os.getenv("ATR_PERIOD", "10"))
 ATR_MULTIPLIER = float(os.getenv("ATR_MULTIPLIER", "3.0"))
+STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "2.0"))    # % Verlust ab Entry
+TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "0"))  # % Gewinn ab Entry (0 = deaktiviert)

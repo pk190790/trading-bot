@@ -10,30 +10,47 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("logs/trades.log"),
         logging.StreamHandler(),
     ],
 )
 logger = logging.getLogger(__name__)
 
-exchange = bc.create_exchange()
+exchange = None
+
+
+def get_exchange():
+    """Returns exchange, reconnects if needed."""
+    global exchange
+    if exchange is None:
+        exchange = bc.create_exchange()
+    return exchange
 
 
 def run_bot() -> None:
-    try:
-        df = bc.get_ohlcv(exchange, SYMBOL, TIMEFRAME, limit=150)
-        df = calculate_supertrend(df, atr_period=ATR_PERIOD, multiplier=ATR_MULTIPLIER)
-        signal = get_latest_signal(df)
+    global exchange
+    retries = 3
+    for attempt in range(1, retries + 1):
+        try:
+            ex = get_exchange()
+            df = bc.get_ohlcv(ex, SYMBOL, TIMEFRAME, limit=150)
+            df = calculate_supertrend(df, atr_period=ATR_PERIOD, multiplier=ATR_MULTIPLIER)
+            signal = get_latest_signal(df)
 
-        last_candle = df.index[-1]
-        trend = "LONG" if df["trend"].iloc[-1] == 1 else "SHORT"
-        logger.info(f"[{last_candle}] Trend: {trend} | Signal: {signal or 'none'}")
+            last_candle = df.index[-1]
+            trend = "LONG" if df["trend"].iloc[-1] == 1 else "SHORT"
+            logger.info(f"[{last_candle}] Trend: {trend} | Signal: {signal or 'none'}")
 
-        if signal:
-            handle_signal(exchange, signal)
+            if signal:
+                handle_signal(ex, signal)
+            return  # success
 
-    except Exception as e:
-        logger.error(f"Bot error: {e}", exc_info=True)
+        except Exception as e:
+            logger.warning(f"Attempt {attempt}/{retries} failed: {e}")
+            exchange = None  # force reconnect on next attempt
+            if attempt < retries:
+                time.sleep(10 * attempt)
+            else:
+                logger.error("All retries failed — will try again next tick.")
 
 
 def get_schedule_interval(timeframe: str) -> int:

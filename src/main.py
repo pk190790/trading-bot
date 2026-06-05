@@ -1,25 +1,25 @@
 import logging
 import time
-import schedule
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from src import binance_client as bc
 from src.supertrend import calculate_supertrend, get_latest_signal
 from src.order_handler import handle_signal
 from src.config import SYMBOL, TIMEFRAME, ATR_PERIOD, ATR_MULTIPLIER
+import os
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-    ],
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
 exchange = None
+last_status = {"trend": "unknown", "signal": "none", "time": "never"}
 
 
 def get_exchange():
-    """Returns exchange, reconnects if needed."""
     global exchange
     if exchange is None:
         exchange = bc.create_exchange()
@@ -36,17 +36,19 @@ def run_bot() -> None:
             df = calculate_supertrend(df, atr_period=ATR_PERIOD, multiplier=ATR_MULTIPLIER)
             signal = get_latest_signal(df)
 
-            last_candle = df.index[-1]
+            last_candle = str(df.index[-1])
             trend = "LONG" if df["trend"].iloc[-1] == 1 else "SHORT"
             logger.info(f"[{last_candle}] Trend: {trend} | Signal: {signal or 'none'}")
 
+            last_status.update({"trend": trend, "signal": signal or "none", "time": last_candle})
+
             if signal:
                 handle_signal(ex, signal)
-            return  # success
+            return
 
         except Exception as e:
             logger.warning(f"Attempt {attempt}/{retries} failed: {e}")
-            exchange = None  # force reconnect on next attempt
+            exchange = None
             if attempt < retries:
                 time.sleep(10 * attempt)
             else:
@@ -54,19 +56,47 @@ def run_bot() -> None:
 
 
 def get_schedule_interval(timeframe: str) -> int:
-    """Returns check interval in seconds (checks twice per candle)."""
     mapping = {"1m": 30, "3m": 90, "5m": 150, "15m": 60, "30m": 120, "1h": 300, "4h": 600}
     return mapping.get(timeframe, 60)
 
 
+# Minimal HTTP server so Railway sees an open port (keeps container alive)
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = (
+            f"Supertrend Bot running\n"
+            f"Symbol: {SYMBOL} | Timeframe: {TIMEFRAME}\n"
+            f"Last check: {last_status['time']}\n"
+            f"Trend: {last_status['trend']} | Signal: {last_status['signal']}\n"
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass  # suppress HTTP logs
+
+
+def start_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logger.info(f"Health server running on port {port}")
+    server.serve_forever()
+
+
 if __name__ == "__main__":
     logger.info(f"Starting Supertrend Bot | {SYMBOL} | {TIMEFRAME}")
-    run_bot()  # run immediately on start
+
+    # Start health server in background thread
+    t = threading.Thread(target=start_health_server, daemon=True)
+    t.start()
 
     interval = get_schedule_interval(TIMEFRAME)
-    logger.info(f"Scheduling checks every {interval}s")
-    schedule.every(interval).seconds.do(run_bot)
+    logger.info(f"Checking every {interval}s")
+
+    run_bot()  # run immediately on start
 
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        time.sleep(interval)
+        run_bot()
